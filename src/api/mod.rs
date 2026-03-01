@@ -1,6 +1,8 @@
+mod browse;
 mod edits;
 mod export;
 mod images;
+mod media;
 mod preview;
 mod upload;
 
@@ -15,4 +17,6 @@ pub fn router() -> Router<AppState> {
         .merge(preview::router())
         .merge(edits::router())
         .merge(export::router())
+        .merge(browse::router())
+        .merge(media::router())
 }

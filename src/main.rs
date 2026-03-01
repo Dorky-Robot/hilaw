@@ -18,7 +18,10 @@ async fn main() {
         .init();
 
     let data_dir = PathBuf::from("data");
-    let state = AppState::new(data_dir);
+    let salita_url =
+        std::env::var("SALITA_URL").unwrap_or_else(|_| "http://localhost:6969".into());
+
+    let state = AppState::new(data_dir, &salita_url);
     storage::init_storage(&state)
         .await
         .expect("Failed to initialize storage");
@@ -30,6 +33,12 @@ async fn main() {
         .layer(TraceLayer::new_for_http())
         .with_state(state);
 
+    // Nest static serving: API routes take priority, fallback to static files
+    let app = app.fallback_service(
+        tower_http::services::ServeDir::new("static")
+            .fallback(tower_http::services::ServeFile::new("static/index.html")),
+    );
+
     let port = std::env::var("PORT").unwrap_or_else(|_| "3000".into());
     let addr = format!("0.0.0.0:{port}");
     let listener = tokio::net::TcpListener::bind(&addr)
@@ -37,6 +46,7 @@ async fn main() {
         .expect("Failed to bind");
 
     tracing::info!("Hilaw server listening on http://{addr}");
+    tracing::info!("Salita endpoint: {salita_url}");
     axum::serve(listener, app).await.expect("Server error");
 }
 
