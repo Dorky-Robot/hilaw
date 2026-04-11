@@ -12,6 +12,9 @@
   let hasMore = false;
   let loading = false;
   let lbIndex = -1;
+  let monthIndex = [];
+  let renderedMonths = new Set();
+  let sortOrder = "newest";
 
   const $ = (sel) => document.querySelector(sel);
   const grid = $("#grid");
@@ -21,10 +24,19 @@
   const lbContent = $("#lb-content");
   const lbInfo = $("#lb-info");
   const sentinel = $("#sentinel");
+  const scrubber = $("#scrubber");
+  const sortToggle = $("#sort-toggle");
 
   // --- Sidebar ---
   $("#sidebar-toggle").onclick = () => $("#sidebar").classList.add("open");
   $("#sidebar-close").onclick = () => $("#sidebar").classList.remove("open");
+
+  // --- Sort Toggle ---
+  sortToggle.onclick = () => {
+    sortOrder = sortOrder === "newest" ? "oldest" : "newest";
+    sortToggle.textContent = sortOrder === "newest" ? "Newest first" : "Oldest first";
+    selectDir(currentDevice, currentDir, currentPath);
+  };
 
   async function loadDevices() {
     try {
@@ -86,9 +98,13 @@
     offset = 0;
     entries = [];
     mediaEntries = [];
+    renderedMonths = new Set();
+    monthIndex = [];
     updateActiveDir();
     updateBreadcrumb();
     grid.innerHTML = "";
+    scrubber.innerHTML = "";
+    loadMonthIndex();
     loadFiles();
   }
 
@@ -131,6 +147,11 @@
   }
 
   // --- File Grid ---
+  function getMonthKey(modified) {
+    if (!modified || modified.length < 7) return "unknown";
+    return modified.slice(0, 7);
+  }
+
   async function loadFiles() {
     if (loading) return;
     loading = true;
@@ -142,6 +163,7 @@
         path: currentPath,
         offset: offset.toString(),
         limit: PAGE_SIZE.toString(),
+        sort: sortOrder,
       });
 
       const res = await fetch("/api/browse?" + params);
@@ -151,6 +173,19 @@
       offset += data.entries.length;
 
       for (const entry of data.entries) {
+        // Inject month header if this is a new month
+        if (!entry.is_dir) {
+          const mk = getMonthKey(entry.modified);
+          if (!renderedMonths.has(mk)) {
+            renderedMonths.add(mk);
+            const header = document.createElement("div");
+            header.className = "month-header";
+            header.id = "month-" + mk;
+            header.textContent = formatMonthLabel(mk);
+            grid.appendChild(header);
+          }
+        }
+
         entries.push(entry);
         if (!entry.is_dir && entry.file_type !== "other") {
           mediaEntries.push(entry);
@@ -162,6 +197,71 @@
     }
 
     loading = false;
+  }
+
+  function formatMonthLabel(key) {
+    if (key === "unknown") return "Unknown Date";
+    const [year, month] = key.split("-");
+    const names = [
+      "", "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December",
+    ];
+    return (names[parseInt(month, 10)] || "Unknown") + " " + year;
+  }
+
+  // --- Month Index & Scrubber ---
+  async function loadMonthIndex() {
+    try {
+      const params = new URLSearchParams({
+        device: currentDevice,
+        dir: currentDir,
+        path: currentPath,
+        sort: sortOrder,
+      });
+      const res = await fetch("/api/browse/months?" + params);
+      monthIndex = await res.json();
+      renderScrubber();
+    } catch (e) {
+      // Scrubber is non-critical, fail silently
+    }
+  }
+
+  function renderScrubber() {
+    scrubber.innerHTML = "";
+    for (const group of monthIndex) {
+      const item = document.createElement("div");
+      item.className = "scrubber-item";
+      // Show short label: "Jan 2024" style
+      const [year, month] = group.month.split("-");
+      const shortNames = [
+        "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+      ];
+      if (group.month === "unknown") {
+        item.textContent = "???";
+      } else {
+        item.textContent = (shortNames[parseInt(month, 10)] || "?") + " " + year;
+      }
+      item.title = group.label + " (" + group.count + ")";
+      item.onclick = () => jumpToMonth(group);
+      scrubber.appendChild(item);
+    }
+  }
+
+  function jumpToMonth(group) {
+    const headerId = "month-" + group.month;
+    const existing = document.getElementById(headerId);
+    if (existing) {
+      existing.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    // Header not yet in DOM — reset and load from that offset
+    offset = group.offset;
+    entries = [];
+    mediaEntries = [];
+    renderedMonths = new Set();
+    grid.innerHTML = "";
+    loadFiles();
   }
 
   function createGridItem(entry) {
